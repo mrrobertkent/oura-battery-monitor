@@ -1,21 +1,31 @@
 # Oura Battery Monitor
 
-Personal Oura Ring monitoring with **n8n** and **Pushover**.
+Oura Ring battery monitoring using **n8n**, typed **Data Tables**, and **Pushover Emergency Priority**.
 
-[Importable workflow](workflows/oura-pushover-n8n-workflow.json) · [Installation guide](docs/pushover-setup.md)
+[Import the n8n workflow](workflows/oura-pushover-n8n-workflow.json) · [Setup guide](docs/pushover-setup.md)
 
-The workflow adaptively polls Oura (8 hours at high charge, down to 15 minutes near depletion), remembers alert history in an n8n Data Table, and delivers Pushover Emergency Priority alerts.
+## Current behavior
 
-| Event | Notification |
-|---|---|
-| Battery at 1–5% | `Battery: X%. Charge now.` |
-| Source reading stops updating for 2½ hours at critically low charge | `Unresponsive` |
-| Battery reported at 0% | `Battery dead (0%).` |
+- Adaptive Oura polling: every 8 hours above 40%, increasing to every 15 minutes at 5% or below.
+- One **Battery: X%. Charge now.** alert on reaching 1–5%.
+- **Unresponsive** after 2½ hours without a newer source reading while critically low.
+- **Battery dead (0%).** when Oura reports 0%, overriding an acknowledgment snooze.
+- Reconciles Pushover acknowledgments every 15 minutes, snoozing repeat and Unresponsive alerts for **six hours**, but not a new Dead alert.
+- Cancels the previous active Emergency receipt before sending a replacement; cancels on charging.
+- Retains resolved alert history for 30 days, with a cap of 250 closed rows.
+- Manual Test separately sends a labeled Pushover test alert and queries Oura immediately.
 
-When Oura reports the ring is charging or placed in its charger, the workflow cancels outstanding Pushover Emergency retries using the Pushover Receipts API. Manual Test independently sends a labeled test notification and checks Oura immediately.
+## n8n CSV table templates
 
-## Oura developer application
+Import both CSVs in **n8n Data Tables**. Confirm Boolean, Number, and Date column types in the import preview:
+
+- [Monitoring state](schemas/oura_battery_monitor_state.csv) — one persistent row.
+- [Pushover alert history](schemas/oura_battery_alerts.csv) — delete the placeholder row after import.
+
+See the [setup guide](docs/pushover-setup.md) for the exact types and credential configuration. The public workflow deliberately contains no credential IDs or Pushover User Key.
+
+## Oura application pages
 
 [Website](https://mrrobertkent.github.io/oura-battery-monitor/) · [Privacy Policy](https://mrrobertkent.github.io/oura-battery-monitor/privacy.html) · [Terms of Service](https://mrrobertkent.github.io/oura-battery-monitor/terms.html)
 
-All API credentials belong in n8n's credential store. Independent personal-use integration, not affiliated with Oura.
+Independent personal integration, not affiliated with Oura.
