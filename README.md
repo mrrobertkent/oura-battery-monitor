@@ -1,25 +1,21 @@
 # Oura Battery Monitor
 
-Personal Oura Ring battery monitoring with **n8n** and **Pushover**.
+Personal Oura Ring monitoring with **n8n** and **Pushover**.
 
-[Import the workflow](workflows/oura-pushover-n8n-workflow.json) · [Installation guide](docs/pushover-setup.md)
+[Importable workflow](workflows/oura-pushover-n8n-workflow.json) · [Installation guide](docs/pushover-setup.md)
 
-## Notifications
+The workflow adaptively polls Oura (8 hours at high charge, down to 15 minutes near depletion), remembers alert history in an n8n Data Table, and delivers Pushover Emergency Priority alerts.
 
-| Battery event | Pushover message |
+| Event | Notification |
 |---|---|
-| Reported 1–5% | `Battery: X%. Charge now.` |
-| Unchanged critical percentage for 2½ hours | `Unresponsive` |
-| Reported 0% | `Battery dead (0%).` |
+| Battery at 1–5% | `Battery: X%. Charge now.` |
+| Source reading stops updating for 2½ hours at critically low charge | `Unresponsive` |
+| Battery reported at 0% | `Battery dead (0%).` |
 
-Each alert is sent once per discharge cycle; rearmed after charging to at least 15%. Pushover Emergency Priority repeats unacknowledged alerts every 30 minutes for up to three hours. Other Pushover notifications are unaffected.
+When Oura reports the ring is charging or placed in its charger, the workflow cancels outstanding Pushover Emergency retries using the Pushover Receipts API. Manual Test independently sends a labeled test notification and checks Oura immediately.
 
-## Adaptive polling
-
-The workflow checks when the next API request is due every 15 minutes. It queries Oura every 8 hours at high charge, progressively more often as battery falls, down to every 15 minutes at 5% or below. **Manual runs always query Oura immediately and independently send a labeled Pushover test notification**, even when the ring is fully charged. The test uses Emergency Priority with a short two-minute expiry and does not change battery alert state. Monitoring and alert state is stored in an n8n Data Table.
-
-## Oura application pages
+## Oura developer application
 
 [Website](https://mrrobertkent.github.io/oura-battery-monitor/) · [Privacy Policy](https://mrrobertkent.github.io/oura-battery-monitor/privacy.html) · [Terms of Service](https://mrrobertkent.github.io/oura-battery-monitor/terms.html)
 
-Never commit credentials or Pushover User Keys to this public repository. Independent personal-use project, not affiliated with Oura.
+All API credentials belong in n8n's credential store. Independent personal-use integration, not affiliated with Oura.
