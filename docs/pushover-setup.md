@@ -12,7 +12,7 @@
 2. In **Get Oura Battery**, choose the connected Oura OAuth2 API credential.
 3. In **Load Battery State** and **Save Battery State**, select your Data Table if not automatically resolved.
 4. In **Push a message**, enter your Pushover User Key and select the Pushover API credential.
-5. **Manual Test** immediately queries Oura regardless of the next scheduled check. It may send a genuine alert if an unsent alert condition is met.
+5. **Manual Test** runs two independent branches: one immediately queries Oura regardless of the next scheduled check, and one always sends a labeled **Oura Ring — Test** Pushover notification. The test message uses Emergency Priority with a **60-second retry interval and 120-second expiry**; acknowledge it in Pushover to stop retries. This branch **does not modify the Data Table**. The live battery branch may also send a real alert if the condition is met. To test, use **Test workflow** rather than executing only a single node.
 6. Publish the workflow. Ensure only one copy is active.
 
 ## Oura polling intervals
