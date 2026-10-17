@@ -1,0 +1,329 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        -96
+      ],
+      "id": "af219455-d2a4-469a-96ed-671338b00d53",
+      "name": "Every 15 Minutes"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        128
+      ],
+      "id": "daa9cfcc-27cf-45ba-97c8-b1a0c4b6c463",
+      "name": "Manual Test"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_monitor_state"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "keyValue": "oura",
+              "condition": "eq"
+            }
+          ]
+        },
+        "limit": 1,
+        "resource": "row"
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -320,
+        -16
+      ],
+      "id": "32854403-0493-4790-964d-748e16ad3040",
+      "name": "Load Battery State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first()?.json ?? {};\nlet state = {};\nif (row.state_json) {\n  try { state = JSON.parse(row.state_json); }\n  catch { throw new Error('Invalid Oura state JSON'); }\n}\nconst isManual = $execution.mode === 'test';\nconst dueAt = Number(state.nextDueMs ?? 0);\nif (!isManual && Number.isFinite(dueAt) && dueAt > Date.now()) return [];\nreturn [{json:{state,isManual}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -16
+      ],
+      "id": "4095ffa8-71f3-4548-9079-a20b15a0030e",
+      "name": "Check Next Poll Time"
+    },
+    {
+      "parameters": {
+        "url": "https://api.ouraring.com/v2/usercollection/ring_battery_level?latest=true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        176,
+        -16
+      ],
+      "id": "9f2967ce-20c7-44d1-8a1c-c6d81b740a4d",
+      "name": "Get Oura Battery"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Independent alerts: 1–5% battery, unresponsive after 2.5h unchanged, reported 0% dead.\nconst FIVE_THRESHOLD = 5;\nconst REARM_AT = 15;\nconst UNRESPONSIVE_AFTER_MS = 150 * 60000;\nconst MAX_FRESH_AGE_MS = 6 * 3600000;\nconst now = Date.now();\nconst s = {...$('Check Next Poll Time').first().json.state};\nlet alert = 'none', title = '', message = '';\nlet level = null, ageMinutes = null, readingStatus = 'missing';\nfunction intervalMins(p) {\n  if (p > 40) return 480;\n  if (p > 30) return 360;\n  if (p > 20) return 240;\n  if (p > 10) return 120;\n  if (p > 7) return 60;\n  if (p > 5) return 30;\n  return 15;\n}\nfunction timestampMs(r) {\n  const n = Number(r.timestamp_unix);\n  if (Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;\n  return Date.parse(r.timestamp || '');\n}\nlet pollMins = 60;\nconst data = $input.first()?.json?.data;\nif (Array.isArray(data) && data.length) {\n  const latest = data.reduce((a,b)=>timestampMs(a)>=timestampMs(b)?a:b);\n  const n = latest.level == null ? NaN : Number(latest.level);\n  const measuredAt = timestampMs(latest);\n  if (Number.isFinite(n) && n >= 0 && n <= 100 && Number.isFinite(measuredAt)) {\n    level = n;\n    ageMinutes = Math.round((now-measuredAt)/60000);\n    const fresh = measuredAt <= now+5*60000 && now-measuredAt <= MAX_FRESH_AGE_MS;\n    const charging = latest.charging === true || latest.in_charger === true;\n    readingStatus = fresh ? 'fresh' : 'stale';\n    pollMins = fresh ? intervalMins(level) : Math.min(60,intervalMins(level));\n    if (level >= REARM_AT && fresh) {\n      s.fiveSent = false;\n      s.unresponsiveSent = false;\n      s.deadSent = false;\n      s.criticalLevel = null;\n      s.criticalSinceMs = null;\n    }\n    const critical = n > 0 && n <= FIVE_THRESHOLD;\n    if ((charging && fresh) || !critical) {\n      s.criticalLevel = null;\n      s.criticalSinceMs = null;\n    } else if (s.criticalLevel !== level || !Number.isFinite(Number(s.criticalSinceMs)) || Number(s.criticalSinceMs) <= 0) {\n      if (fresh) {\n        s.criticalLevel = level;\n        s.criticalSinceMs = now;\n      }\n    }\n    if (!charging && level === 0 && s.deadSent !== true) {\n      alert = 'dead';\n      title = 'Oura Ring';\n      message = 'Battery dead (0%).';\n      s.deadSent = true;\n      s.fiveSent = true;\n      s.unresponsiveSent = true;\n    } else if (!charging && fresh && critical && s.fiveSent !== true) {\n      alert = 'low';\n      title = 'Oura Ring';\n      message = 'Battery: '+level+'%. Charge now.';\n      s.fiveSent = true;\n    } else if (!charging && critical && s.fiveSent === true && s.unresponsiveSent !== true &&\n               Number.isFinite(Number(s.criticalSinceMs)) &&\n               now-Number(s.criticalSinceMs) >= UNRESPONSIVE_AFTER_MS) {\n      alert = 'unresponsive';\n      title = 'Oura Ring';\n      message = 'Unresponsive';\n      s.unresponsiveSent = true;\n    }\n  } else readingStatus = 'invalid';\n}\ns.nextDueMs = now+pollMins*60000;\nreturn [{json:{key:'oura',state_json:JSON.stringify(s),alert,title,message,\n  level,age_minutes:ageMinutes,reading_status:readingStatus,next_poll_minutes:pollMins}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -16
+      ],
+      "id": "37a56a3f-3a8f-4600-accd-427dc82de7ea",
+      "name": "Evaluate Battery"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "df6a05a0-e40e-42af-aef5-90b4d61b49e4",
+              "leftValue": "={{ $json.alert }}",
+              "rightValue": "none",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "c8b53552-0067-4be7-b892-bda41124259f",
+      "name": "Send Oura Alert?"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_monitor_state"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "key",
+              "keyValue": "oura",
+              "condition": "eq"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "key": "oura",
+            "state_json": "={{ $('Evaluate Battery').first().json.state_json }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "key",
+              "displayName": "key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "state_json",
+              "displayName": "state_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "resource": "row"
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        -16
+      ],
+      "id": "25dec0e8-7e9a-4f51-bc1b-d2f3ecfaf615",
+      "name": "Save Battery State"
+    },
+    {
+      "parameters": {
+        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
+        "message": "={{ $json.message }}",
+        "priority": 2,
+        "retry": 1800,
+        "expire": 10800,
+        "additionalFields": {
+          "title": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.pushover",
+      "typeVersion": 1,
+      "position": [
+        928,
+        -112
+      ],
+      "id": "2763f1b2-6b60-4de3-8bf4-483de792947f",
+      "name": "Push a message",
+      "retryOnFail": true
+    }
+  ],
+  "connections": {
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Load Battery State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test": {
+      "main": [
+        [
+          {
+            "node": "Load Battery State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Battery State": {
+      "main": [
+        [
+          {
+            "node": "Check Next Poll Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Next Poll Time": {
+      "main": [
+        [
+          {
+            "node": "Get Oura Battery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Oura Battery": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Battery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Battery": {
+      "main": [
+        [
+          {
+            "node": "Send Oura Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Oura Alert?": {
+      "main": [
+        [
+          {
+            "node": "Push a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Battery State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push a message": {
+      "main": [
+        [
+          {
+            "node": "Save Battery State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "name": "Oura Ring — Adaptive Critical Battery Alerts",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

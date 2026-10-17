@@ -1,0 +1,9 @@
+# No credentials, OAuth callbacks, or personal API data in the public repository
+.env
+.env.*
+*.token
+*credentials*.json
+*secrets*.json
+__pycache__/
+*.pyc
+.DS_Store
