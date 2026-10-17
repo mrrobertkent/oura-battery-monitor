@@ -221,6 +221,40 @@
       "id": "2763f1b2-6b60-4de3-8bf4-483de792947f",
       "name": "Push a message",
       "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Diagnostic only: always sends a test; does not read or modify Oura state.\nreturn [{ json: { title: 'Oura Ring — Test', message: 'Test notification received. Pushover emergency delivery is working.' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -315,
+        340
+      ],
+      "id": "08fb2a4a-f8ea-4501-a2c3-5a5169262fbb",
+      "name": "Compose Test Alert"
+    },
+    {
+      "parameters": {
+        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
+        "message": "={{ $json.message }}",
+        "priority": 2,
+        "retry": 60,
+        "expire": 120,
+        "additionalFields": {
+          "title": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.pushover",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        340
+      ],
+      "id": "ca5e8cda-24d9-4a35-b52d-3157ce7c235f",
+      "name": "Push Test Notification"
     }
   ],
   "connections": {
@@ -240,6 +274,11 @@
         [
           {
             "node": "Load Battery State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Compose Test Alert",
             "type": "main",
             "index": 0
           }
@@ -313,6 +352,17 @@
         [
           {
             "node": "Save Battery State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Test Alert": {
+      "main": [
+        [
+          {
+            "node": "Push Test Notification",
             "type": "main",
             "index": 0
           }
