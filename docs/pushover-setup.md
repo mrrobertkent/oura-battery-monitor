@@ -1,23 +1,31 @@
-# Oura Battery Monitor — Installation
+# Oura Battery Monitor — n8n Installation
 
-## Requirements
-
-- Oura OAuth2 API credential connected in n8n.
-- Pushover Application/API Token saved as a Pushover API credential, plus your Pushover User Key.
-- n8n Data Table named `oura_battery_monitor_state` with two **String** columns: `key` and `state_json`. Insert the first row: `key = oura`, `state_json = {}`.
-
-## Import
+## Setup
 
 1. Import [the workflow JSON](../workflows/oura-pushover-n8n-workflow.json) into n8n.
-2. In **Get Oura Battery**, choose the connected Oura OAuth2 API credential.
-3. In **Load Battery State** and **Save Battery State**, select your Data Table if not automatically resolved.
-4. In **Push a message**, enter your Pushover User Key and select the Pushover API credential.
-5. **Manual Test** runs two independent branches: one immediately queries Oura regardless of the next scheduled check, and one always sends a labeled **Oura Ring — Test** Pushover notification. The test message uses Emergency Priority with a **60-second retry interval and 120-second expiry**; acknowledge it in Pushover to stop retries. This branch **does not modify the Data Table**. The live battery branch may also send a real alert if the condition is met. To test, use **Test workflow** rather than executing only a single node.
-6. Publish the workflow. Ensure only one copy is active.
+2. In **Get Oura Battery**, select your existing Oura OAuth2 API credential.
+3. Create/select the n8n Data Table `oura_battery_monitor_state` with two String columns: `key` and `state_json`. Insert one row: `key = oura`, `state_json = {}`.
+4. Select that table in **Load Battery State** and **Save Battery State**.
+5. Configure **Push a message** and **Push Test Notification** with your Pushover User Key and Pushover API credential.
+6. Select the **same Pushover API credential** in **Cancel Pushover Receipts** (HTTP Request → Predefined Credential Type → Pushover API). The Pushover credential injects its API token into the form body.
+7. Execute **Manual Test** to query Oura immediately and independently send a short Pushover emergency test alert. Acknowledge the test alert to stop repeats.
+8. Activate one copy of the workflow.
 
-## Oura polling intervals
+## Behavior
 
-| Reported charge | Interval |
+- **Battery 1–5%:** `Battery: X%. Charge now.`
+- **Unresponsive:** `Unresponsive` after 150 minutes without a newer *source reading* while last known level remains between 1% and 5%.
+- **Dead:** `Battery dead (0%).` after a fresh API report of 0%.
+- **Charging:** a fresh observation with `charging: true` or `in_charger: true` calls Pushover's receipt cancellation endpoint to stop retries of prior emergency notifications.
+- **Rearmed:** when a fresh reading is 15% or higher.
+- **Emergency Priority:** the production Pushover node repeats every 30 minutes for up to three hours, stopping earlier when acknowledged or canceled.
+- **Manual Test:** always runs a separate 2-minute emergency test and independently queries Oura, bypassing the next-due gate.
+
+## Adaptive polling
+
+The workflow starts on a 15-minute schedule and skips Oura API calls until its next due time stored in the Data Table:
+
+| Level | Oura API interval |
 |---|---|
 | 41–100% | 8 hours |
 | 31–40% | 6 hours |
@@ -27,15 +35,20 @@
 | 6–7% | 30 minutes |
 | 0–5% | 15 minutes |
 
-The fixed 15-minute Schedule Trigger skips API calls until the Data Table's next due time. A missing response retries after 60 minutes. The reading is Oura cloud data, not a direct Bluetooth connection.
+## Oura timestamps
 
-## Alerts and persistence
+The workflow prefers the numerical millisecond `producer_timestamp` when it is plausible and agrees approximately with the ISO `timestamp`; otherwise it falls back to `timestamp`. The interpretation of `producer_timestamp` as the ring/source observation time is a reasonable inference, **not a verified guarantee from Oura's published documentation**. Unresponsive means the source timestamp has not advanced for 2½ hours; it is not a live Bluetooth connection test.
 
-- **Low:** fresh 1–5% reading → `Battery: X%. Charge now.`
-- **Unresponsive:** unchanged 1–5% reading for 150 minutes following the low-battery alert → `Unresponsive`.
-- **Dead:** explicit API level 0% → `Battery dead (0%).` (independent of the Unresponsive alert).
-- Charging suppresses alerts. Flags reset after a fresh 15%+ reading.
-- The single Data Table row holds poll timing, previous critical reading, unchanged-since time and alert flags.
-- Pushover Emergency Priority (2) resends every 30 minutes for up to 3 hours unless acknowledged; this is configured per message.
+`next_token` is an API pagination cursor; `null` requires no action for the `latest=true` query.
 
-The workflow logic was tested against simulated responses. Verify the actual nodes in your n8n environment before publishing. Keep API secrets in n8n credentials. The public workflow intentionally excludes credential IDs and the Pushover User Key.
+## Pushover receipts
+
+The production Pushover node returns a receipt for every Emergency Priority message. The workflow records receipt IDs and their three-hour expiry in the Data Table, and cancels still-active receipts via Pushover's API once Oura reports charging/charger or a sufficient recharge. Canceling prevents further retries; it does not retract a notification already displayed. Successful API responses must be confirmed before receipts are removed from stored state.
+
+## Operations and security
+
+Keep all OAuth/Pushover secrets inside n8n credentials. The public GitHub workflow intentionally has no credential IDs or Pushover User Key. The separate personal import preserves your existing credential references. Avoid overlapping active copies; the Data Table record is not transaction-locked across simultaneous executions.
+
+**Important:** The receipt-cancellation HTTP node needs verification in your own n8n version because credential injection and form encoding vary by node version. First run a low-impact test and confirm it returns Pushover `status: 1` before relying on automatic cancellation.
+
+The workflow's logic was exercised against simulated Oura responses; live API and receipt cancellation still require an end-to-end test.
