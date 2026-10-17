@@ -16,7 +16,7 @@ Each alert is sent once per discharge cycle; rearmed after charging to at least 
 
 ## Adaptive polling
 
-The workflow checks when the next API request is due every 15 minutes. It queries Oura every 8 hours at high charge, progressively more often as battery falls, down to every 15 minutes at 5% or below. **Manual runs always query Oura immediately.** Monitoring and alert state is stored in an n8n Data Table.
+The workflow checks when the next API request is due every 15 minutes. It queries Oura every 8 hours at high charge, progressively more often as battery falls, down to every 15 minutes at 5% or below. **Manual runs always query Oura immediately and independently send a labeled Pushover test notification**, even when the ring is fully charged. The test uses Emergency Priority with a short two-minute expiry and does not change battery alert state. Monitoring and alert state is stored in an n8n Data Table.
 
 ## Oura application pages
 
