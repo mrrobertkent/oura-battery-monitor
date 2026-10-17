@@ -1,54 +1,75 @@
-# Oura Battery Monitor — n8n Installation
+# Oura Battery Monitor — Setup
 
-## Setup
+## Import CSV Data Tables
 
-1. Import [the workflow JSON](../workflows/oura-pushover-n8n-workflow.json) into n8n.
-2. In **Get Oura Battery**, select your existing Oura OAuth2 API credential.
-3. Create/select the n8n Data Table `oura_battery_monitor_state` with two String columns: `key` and `state_json`. Insert one row: `key = oura`, `state_json = {}`.
-4. Select that table in **Load Battery State** and **Save Battery State**.
-5. Configure **Push a message** and **Push Test Notification** with your Pushover User Key and Pushover API credential.
-6. Select the **same Pushover API credential** in **Cancel Pushover Receipts** (HTTP Request → Predefined Credential Type → Pushover API). The Pushover credential injects its API token into the form body.
-7. Execute **Manual Test** to query Oura immediately and independently send a short Pushover emergency test alert. Acknowledge the test alert to stop repeats.
-8. Activate one copy of the workflow.
+Use n8n **Data Tables → Create from CSV**:
 
-## Behavior
+- [oura_battery_monitor_state.csv](../schemas/oura_battery_monitor_state.csv)
+- [oura_battery_alerts.csv](../schemas/oura_battery_alerts.csv)
 
-- **Battery 1–5%:** `Battery: X%. Charge now.`
-- **Unresponsive:** `Unresponsive` after 150 minutes without a newer *source reading* while last known level remains between 1% and 5%.
-- **Dead:** `Battery dead (0%).` after a fresh API report of 0%.
-- **Charging:** a fresh observation with `charging: true` or `in_charger: true` calls Pushover's receipt cancellation endpoint to stop retries of prior emergency notifications.
-- **Rearmed:** when a fresh reading is 15% or higher.
-- **Emergency Priority:** the production Pushover node repeats every 30 minutes for up to three hours, stopping earlier when acknowledged or canceled.
-- **Manual Test:** always runs a separate 2-minute emergency test and independently queries Oura, bypassing the next-due gate.
+Confirm these exact types:
 
-## Adaptive polling
+**oura_battery_monitor_state**
 
-The workflow starts on a 15-minute schedule and skips Oura API calls until its next due time stored in the Data Table:
-
-| Level | Oura API interval |
+| Column | Type |
 |---|---|
-| 41–100% | 8 hours |
-| 31–40% | 6 hours |
-| 21–30% | 4 hours |
-| 11–20% | 2 hours |
-| 8–10% | 1 hour |
-| 6–7% | 30 minutes |
-| 0–5% | 15 minutes |
+| ring_key | String |
+| battery_level | Number |
+| last_source_at | Date |
+| last_source_seen_at | Date |
+| last_checked_at | Date |
+| next_poll_at | Date |
+| charging | Boolean |
+| in_charger | Boolean |
+| low_alert_sent | Boolean |
+| unresponsive_alert_sent | Boolean |
+| dead_alert_sent | Boolean |
+| snoozed_until | Date |
 
-## Oura timestamps
+The seed row `ring_key=oura` must remain.
 
-The workflow prefers the numerical millisecond `producer_timestamp` when it is plausible and agrees approximately with the ISO `timestamp`; otherwise it falls back to `timestamp`. The interpretation of `producer_timestamp` as the ring/source observation time is a reasonable inference, **not a verified guarantee from Oura's published documentation**. Unresponsive means the source timestamp has not advanced for 2½ hours; it is not a live Bluetooth connection test.
+**oura_battery_alerts**
 
-`next_token` is an API pagination cursor; `null` requires no action for the `latest=true` query.
+| Column | Type |
+|---|---|
+| receipt_id | String |
+| ring_key | String |
+| alert_type | String |
+| status | String |
+| sent_at | Date |
+| expires_at | Date |
+| acknowledged_at | Date |
+| canceled_at | Date |
+| resolved_at | Date |
 
-## Pushover receipts
+Delete the `TEMPLATE_DELETE_AFTER_IMPORT` placeholder row after importing.
 
-The production Pushover node returns a receipt for every Emergency Priority message. The workflow records receipt IDs and their three-hour expiry in the Data Table, and cancels still-active receipts via Pushover's API once Oura reports charging/charger or a sufficient recharge. Canceling prevents further retries; it does not retract a notification already displayed. Successful API responses must be confirmed before receipts are removed from stored state.
+## Configure workflow
 
-## Operations and security
+1. Import [workflow](../workflows/oura-pushover-n8n-workflow.json).
+2. Select your existing Oura OAuth2 credential in **Get Oura Battery**.
+3. Select your Pushover credential in **Send Pushover Emergency**, **Send Test Pushover**, **Read Pushover Receipt** and **Cancel Old Pushover Receipt**.
+4. Enter your Pushover User Key in the two Pushover nodes.
+5. Select the correctly named Data Table in each Data Table node.
+6. Run **Manual Test**; it checks the battery immediately and sends a separate labeled emergency test message.
+7. Confirm receipt lookup, cancellation and table writes before activation. Activate only one copy.
 
-Keep all OAuth/Pushover secrets inside n8n credentials. The public GitHub workflow intentionally has no credential IDs or Pushover User Key. The separate personal import preserves your existing credential references. Avoid overlapping active copies; the Data Table record is not transaction-locked across simultaneous executions.
+## Rules
 
-**Important:** The receipt-cancellation HTTP node needs verification in your own n8n version because credential injection and form encoding vary by node version. First run a low-impact test and confirm it returns Pushover `status: 1` before relying on automatic cancellation.
+- Oura API polling: 8h above 40%, 6h at 31–40%, 4h at 21–30%, 2h at 11–20%, 1h at 8–10%, 30min at 6–7%, 15min at 0–5%.
+- A 15-minute schedule checks whether the battery API poll is due and separately reconciles active Pushover acknowledgments.
+- 1–5%: `Battery: X%. Charge now.`
+- No newer source reading for 150 minutes at critical battery: `Unresponsive`.
+- Reported 0%: `Battery dead (0%).`
+- Emergency Priority: retry every 30 minutes, stop after 3h or earlier when acknowledged/canceled.
+- Acknowledgment causes a **6-hour snooze** for repeat/Unresponsive alerts; a new Dead alert still sends.
+- Charging cancels the active receipt. A new escalation cancels the previous receipt before sending.
+- Battery at 15%+ resets alert eligibility.
 
-The workflow's logic was exercised against simulated Oura responses; live API and receipt cancellation still require an end-to-end test.
+## Retention
+
+The monitoring table keeps one permanent row. Daily cleanup deletes closed receipt records older than 30 days, and retains at most 250 additional recent closed records. Active receipts are excluded.
+
+## Reliability
+
+This workflow was tested using simulated data, not live n8n executions. Check imported node settings for your installed n8n version. In particular, Pushover receipt GET/cancel authentication and Data Table delete operations require live testing. A single workflow avoids intentional stacking, but parallel executions and uncertain API responses can still create duplicates. Do not enable multiple active copies.
