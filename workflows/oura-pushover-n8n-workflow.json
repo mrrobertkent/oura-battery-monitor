@@ -1,4 +1,5 @@
 {
+  "name": "Oura Battery Monitor — Adaptive Alerts and Acknowledgment",
   "nodes": [
     {
       "parameters": {
@@ -14,10 +15,10 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -560,
-        -96
+        -1540,
+        -220
       ],
-      "id": "af219455-d2a4-469a-96ed-671338b00d53",
+      "id": "849cf76f-31d2-4cd8-b866-ad4a3aed3fde",
       "name": "Every 15 Minutes"
     },
     {
@@ -25,14 +26,479 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -560,
-        128
+        -1540,
+        30
       ],
-      "id": "daa9cfcc-27cf-45ba-97c8-b1a0c4b6c463",
+      "id": "fac1ce03-898a-4078-9ba7-aec3e8224916",
       "name": "Manual Test"
     },
     {
       "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "active"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1280,
+        -180
+      ],
+      "id": "7bbf4fc8-ac9e-4ae0-9032-affa25f34c6c",
+      "name": "Find Active Receipt",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c807af59-7cd8-43c3-84d0-8463eb96bb29",
+              "leftValue": "={{ /^[A-Za-z0-9]{30}$/.test(String($json.receipt_id || '')) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1050,
+        -180
+      ],
+      "id": "96959111-4357-47ce-b2b6-86997e4b3947",
+      "name": "Receipt Exists?"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://api.pushover.net/1/receipts/' + $('Find Active Receipt').first().json.receipt_id + '.json' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pushoverApi",
+        "options": {},
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -820,
+        -330
+      ],
+      "id": "d49a7c36-3d49-4a36-9131-824390fd960e",
+      "name": "Read Pushover Receipt"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const receipt=$('Find Active Receipt').first().json;\nconst response=$input.first().json;\nif(Number(response.status)!==1)throw new Error('Pushover receipt status request failed');\nconst ack=Number(response.acknowledged)===1;\nconst expired=Number(response.expired)===1;\nconst state=ack?'acknowledged':expired?'expired':'active';\nconst at=Number(response.acknowledged_at)||0;\nreturn [{json:{receipt_id:receipt.receipt_id,status:state,\n  acknowledged_at:at>0?new Date(at*1000).toISOString():null,\n  resolved_at:state==='active'?null:new Date().toISOString(),\n  snoozed_until:ack&&at>0?new Date(at*1000+6*3600000).toISOString():null}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        -330
+      ],
+      "id": "a05f0e00-f8e2-4503-969c-45f838f49ec1",
+      "name": "Classify Receipt"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "169da8a5-38d7-4f52-80f1-e8c4c268a687",
+              "leftValue": "={{ $json.status !== 'active' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -360,
+        -330
+      ],
+      "id": "2a78a09f-4390-4a44-9fe7-c028dcffde25",
+      "name": "Receipt Resolved?"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "receipt_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.receipt_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "resolved_at": "={{ $json.resolved_at }}",
+            "acknowledged_at": "={{ $json.acknowledged_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "receipt_id",
+              "displayName": "receipt_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ring_key",
+              "displayName": "ring_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "expires_at",
+              "displayName": "expires_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "acknowledged_at",
+              "displayName": "acknowledged_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "canceled_at",
+              "displayName": "canceled_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -120,
+        -410
+      ],
+      "id": "fb179287-0043-4734-8ff5-ec0af13d3af3",
+      "name": "Resolve Receipt"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4fe0dd7a-7762-405a-afb0-e5757069fadb",
+              "leftValue": "={{ $('Classify Receipt').first().json.status === 'acknowledged' }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        110,
+        -410
+      ],
+      "id": "1b7b79f3-4448-476a-91f5-280e6761b0b0",
+      "name": "Acknowledged?"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_monitor_state"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ring_key",
+              "condition": "eq",
+              "keyValue": "oura"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "snoozed_until": "={{ $('Classify Receipt').first().json.snoozed_until }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ring_key",
+              "displayName": "ring_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "battery_level",
+              "displayName": "battery_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_source_at",
+              "displayName": "last_source_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_source_seen_at",
+              "displayName": "last_source_seen_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_checked_at",
+              "displayName": "last_checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "next_poll_at",
+              "displayName": "next_poll_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "charging",
+              "displayName": "charging",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "in_charger",
+              "displayName": "in_charger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "low_alert_sent",
+              "displayName": "low_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "unresponsive_alert_sent",
+              "displayName": "unresponsive_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "dead_alert_sent",
+              "displayName": "dead_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "snoozed_until",
+              "displayName": "snoozed_until",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        330,
+        -510
+      ],
+      "id": "f01afcd9-86d2-4878-9648-307ecd1fa721",
+      "name": "Record Snooze"
+    },
+    {
+      "parameters": {
+        "resource": "row",
         "operation": "get",
         "dataTableId": {
           "__rl": true,
@@ -43,41 +509,41 @@
         "filters": {
           "conditions": [
             {
-              "keyName": "key",
-              "keyValue": "oura",
-              "condition": "eq"
+              "keyName": "ring_key",
+              "condition": "eq",
+              "keyValue": "oura"
             }
           ]
         },
-        "limit": 1,
-        "resource": "row"
+        "returnAll": false,
+        "limit": 1
       },
       "type": "n8n-nodes-base.dataTable",
       "typeVersion": 1.1,
       "position": [
-        -320,
-        -16
+        550,
+        -170
       ],
-      "id": "32854403-0493-4790-964d-748e16ad3040",
-      "name": "Load Battery State",
-      "alwaysOutputData": true
+      "id": "9d74025b-9fcc-4a50-9f32-21e9ca5a3ddb",
+      "name": "Load Ring State"
     },
     {
       "parameters": {
-        "jsCode": "const row = $input.first()?.json ?? {};\nlet state = {};\nif (row.state_json) {\n  try { state = JSON.parse(row.state_json); }\n  catch { throw new Error('Invalid Oura state JSON'); }\n}\nconst isManual = $execution.mode === 'test';\nconst dueAt = Number(state.nextDueMs ?? 0);\nif (!isManual && Number.isFinite(dueAt) && dueAt > Date.now()) return [];\nreturn [{json:{state,isManual}}];",
-        "mode": "runOnceForAllItems"
+        "mode": "runOnceForAllItems",
+        "jsCode": "const row=$input.first()?.json;\nif(!row || row.ring_key!=='oura')throw new Error('Missing monitoring row in the Data Table');\nconst manual=$execution.mode==='test';\nconst next=Date.parse(row.next_poll_at||'');\nif(!manual&&Number.isFinite(next)&&next>Date.now())return [];\nreturn [{json:{...row,manual}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -80,
-        -16
+        780,
+        -170
       ],
-      "id": "4095ffa8-71f3-4548-9079-a20b15a0030e",
-      "name": "Check Next Poll Time"
+      "id": "a92e66ee-1f37-453c-a771-9f47952ee7fb",
+      "name": "Polling Gate"
     },
     {
       "parameters": {
+        "method": "GET",
         "url": "https://api.ouraring.com/v2/usercollection/ring_battery_level?latest=true",
         "authentication": "genericCredentialType",
         "genericAuthType": "oAuth2Api",
@@ -86,24 +552,56 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        176,
-        -16
+        1030,
+        -170
       ],
-      "id": "9f2967ce-20c7-44d1-8a1c-c6d81b740a4d",
+      "id": "a05fb376-9d1a-4232-a691-2aed553013b8",
       "name": "Get Oura Battery"
     },
     {
       "parameters": {
-        "jsCode": "// Prefer plausible producer_timestamp to distinguish new source readings from repeated API responses.\nconst LOW_AT=5, REARM_AT=15, UNRESPONSIVE_MINUTES=150, MAX_SAMPLE_AGE_MINUTES=360;\nconst now=Date.now();\nconst state={...$('Check Next Poll Time').first().json.state};\nconst rows=$input.first()?.json?.data;\nfunction sourceMs(r) {\n  const iso=Date.parse(r.timestamp||'');\n  const raw=r.producer_timestamp==null?NaN:Number(r.producer_timestamp);\n  const p=Number.isFinite(raw)&&raw>1e12?raw:NaN;\n  if(Number.isFinite(p)&&p<=now+300000&&p>Date.parse('2020-01-01T00:00:00Z')&&\n     (!Number.isFinite(iso)||Math.abs(p-iso)<=24*3600000)) return p;\n  return iso;\n}\nfunction interval(level) {\n  if(level>40)return 480;\n  if(level>30)return 360;\n  if(level>20)return 240;\n  if(level>10)return 120;\n  if(level>7)return 60;\n  if(level>5)return 30;\n  return 15;\n}\nstate.receipts=Array.isArray(state.receipts)?state.receipts.filter(r=>\n  r&&/^[A-Za-z0-9]{30}$/.test(String(r.id))&&Number(r.expiresAtMs)>now):[];\nlet action='none', alert='none', title='Oura Ring', message='', status='missing';\nlet level=null, ageMinutes=null, pollMinutes=60, sourceTimeMs=null;\nlet charging=false, inCharger=false;\nif(Array.isArray(rows)&&rows.length){\n  const r=rows.reduce((a,b)=>sourceMs(a)>=sourceMs(b)?a:b);\n  const l=r.level==null?NaN:Number(r.level);\n  const at=sourceMs(r);\n  if(Number.isFinite(l)&&l>=0&&l<=100&&Number.isFinite(at)){\n    level=l;sourceTimeMs=at;\n    ageMinutes=Math.round((now-at)/60000);\n    const fresh=ageMinutes>=-5&&ageMinutes<=MAX_SAMPLE_AGE_MINUTES;\n    status=fresh?'fresh':'stale';\n    charging=r.charging===true;inCharger=r.in_charger===true;\n    const onCharger=charging||inCharger, critical=level>0&&level<=LOW_AT;\n    pollMinutes=fresh?interval(level):Math.min(60,interval(level));\n    if(fresh&&level>=REARM_AT){\n      state.lowSent=false;state.unresponsiveSent=false;state.deadSent=false;\n      state.sourceTimeMs=null;state.sourceSeenAtMs=null;\n    }\n    if((onCharger&&fresh)||!critical){\n      state.sourceTimeMs=null;state.sourceSeenAtMs=null;\n    }else if(fresh&&(state.sourceTimeMs==null||at>Number(state.sourceTimeMs))){\n      state.sourceTimeMs=at;state.sourceSeenAtMs=now;\n    }\n    if(fresh&&(onCharger||level>=REARM_AT)&&state.receipts.length){\n      action='cancel';\n    }else if(!onCharger){\n      if(fresh&&level===0&&state.deadSent!==true){\n        action='send';alert='dead';message='Battery dead (0%).';\n        state.deadSent=true;state.lowSent=true;\n      }else if(fresh&&critical&&state.lowSent!==true){\n        action='send';alert='low';message='Battery: '+level+'%. Charge now.';\n        state.lowSent=true;\n      }else if(critical&&state.lowSent===true&&state.unresponsiveSent!==true&&\n        Number.isFinite(Number(state.sourceSeenAtMs))&&Number(state.sourceSeenAtMs)>0&&\n        now-Number(state.sourceSeenAtMs)>=UNRESPONSIVE_MINUTES*60000){\n        action='send';alert='unresponsive';message='Unresponsive';\n        state.unresponsiveSent=true;\n      }\n    }\n  }else status='invalid';\n}\nstate.nextDueMs=now+pollMinutes*60000;\nreturn [{json:{key:'oura',state_json:JSON.stringify(state),action,alert,title,message,\n  receiptsToCancel:action==='cancel'?state.receipts.map(r=>r.id):[],\n  level,source_time_ms:sourceTimeMs,age_minutes:ageMinutes,status,\n  charging,in_charger:inCharger,next_poll_minutes:pollMinutes,\n  manual_run:$('Check Next Poll Time').first().json.manual}}];",
-        "mode": "runOnceForAllItems"
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "active"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1250,
+        -170
+      ],
+      "id": "f5cbde5f-c924-48a4-9fc4-59806c3338f2",
+      "name": "Get Current Active Receipt",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Stateful evaluation from first-class n8n Data Table fields.\nconst s=$('Polling Gate').first().json;\nconst now=Date.now();\nconst rows=$('Get Oura Battery').first().json.data||[];\nconst latest=rows.length?rows.reduce((a,b)=>timeOf(a)>timeOf(b)?a:b):null;\nfunction timeOf(r){\n const iso=Date.parse(r.timestamp||'');\n const n=Number(r.producer_timestamp);\n if(Number.isFinite(n)&&n>1e12&&n<=now+300000&&n>1577836800000&&\n   (!Number.isFinite(iso)||Math.abs(n-iso)<86400000))return n;\n return iso;\n}\nfunction mins(p){if(p>40)return 480;if(p>30)return 360;if(p>20)return 240;if(p>10)return 120;if(p>7)return 60;if(p>5)return 30;return 15;}\nconst active=$input.first().json;\nconst hasActive=/^[A-Za-z0-9]{30}$/.test(String(active.receipt_id||''));\nconst out={...s,manual:undefined,has_active:hasActive,active_receipt:hasActive?active.receipt_id:null,\n alert_type:'none',action:'none',title:'Oura Ring',message:'',battery_status:'missing'};\nconst value=latest?.level;\nconst level=value==null?NaN:Number(value);\nconst sourceAt=latest?timeOf(latest):NaN;\nlet poll=60;\nif(Number.isFinite(level)&&level>=0&&level<=100&&Number.isFinite(sourceAt)){\n const age=(now-sourceAt)/60000, fresh=age>=-5&&age<=360;\n const charging=latest.charging===true, inCharger=latest.in_charger===true;\n const critical=level>0&&level<=5;\n out.battery_status=fresh?'fresh':'stale';\n poll=fresh?mins(level):Math.min(mins(level),60);\n out.battery_level=level;\n out.charging=charging;out.in_charger=inCharger;\n out.last_checked_at=new Date(now).toISOString();\n const priorSource=Date.parse(s.last_source_at||'');\n if(fresh&&(!Number.isFinite(priorSource)||sourceAt>priorSource)){\n   out.last_source_at=new Date(sourceAt).toISOString();\n   out.last_source_seen_at=new Date(now).toISOString();\n }\n if(fresh&&level>=15){\n   out.low_alert_sent=false;out.unresponsive_alert_sent=false;out.dead_alert_sent=false;\n   out.snoozed_until=new Date(0).toISOString();\n }\n if(fresh&&(charging||inCharger)){\n   // Charging cancels any outstanding Emergency retries.\n   if(hasActive)out.action='cancel';\n }else if(fresh&&!charging&&!inCharger){\n   const snoozed=Date.parse(s.snoozed_until||'')>now;\n   if(level===0&&s.dead_alert_sent!==true){\n     out.alert_type='dead';out.message='Battery dead (0%).';\n   }else if(!snoozed&&critical&&s.low_alert_sent!==true){\n     out.alert_type='low';out.message='Battery: '+level+'%. Charge now.';\n   }else if(!snoozed&&critical&&s.low_alert_sent===true&&s.unresponsive_alert_sent!==true&&\n     Number.isFinite(Date.parse(out.last_source_seen_at||''))&&\n     now-Date.parse(out.last_source_seen_at)>=150*60000){\n     out.alert_type='unresponsive';out.message='Unresponsive';\n   }\n   if(out.alert_type!=='none')out.action=hasActive?'cancel':'send';\n }\n}\nout.next_poll_at=new Date(now+poll*60000).toISOString();\nreturn [{json:out}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        432,
-        -16
+        1480,
+        -170
       ],
-      "id": "37a56a3f-3a8f-4600-accd-427dc82de7ea",
+      "id": "acbf1988-91b6-428c-a361-1922f1e5113a",
       "name": "Evaluate Battery"
     },
     {
@@ -118,12 +616,12 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "df6a05a0-e40e-42af-aef5-90b4d61b49e4",
-              "leftValue": "={{ $json.action }}",
-              "rightValue": "send",
+              "id": "73d6dff5-4a81-4eb0-af1a-bcfb1abf5621",
+              "leftValue": "={{ $json.action === 'cancel' }}",
               "operator": {
-                "type": "string",
-                "operation": "equals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ]
@@ -133,41 +631,85 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        910,
-        -15
+        1720,
+        -170
       ],
-      "id": "c8b53552-0067-4be7-b892-bda41124259f",
-      "name": "Send Oura Alert?"
+      "id": "6be6bc1a-e0c5-40a9-93a1-a6ab98dbefec",
+      "name": "Cancel Previous Alert?"
     },
     {
       "parameters": {
-        "operation": "upsert",
+        "method": "POST",
+        "url": "={{ 'https://api.pushover.net/1/receipts/' + $('Evaluate Battery').first().json.active_receipt + '/cancel.json' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pushoverApi",
+        "options": {},
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "source",
+              "value": "oura"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1940,
+        -350
+      ],
+      "id": "5fa5561f-8e3d-4522-881c-186604ccd9d2",
+      "name": "Cancel Old Pushover Receipt"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "if(Number($input.first().json.status)!==1)throw new Error('Pushover receipt cancellation failed');\nreturn [{json:{receipt_id:$('Evaluate Battery').first().json.active_receipt,\n  canceled_at:new Date().toISOString(),status:'canceled',resolved_at:new Date().toISOString()}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2150,
+        -350
+      ],
+      "id": "74d03ff9-2658-4527-a41d-46b46df540be",
+      "name": "Verify Cancellation"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "update",
         "dataTableId": {
           "__rl": true,
           "mode": "name",
-          "value": "oura_battery_monitor_state"
+          "value": "oura_battery_alerts"
         },
         "matchType": "allConditions",
         "filters": {
           "conditions": [
             {
-              "keyName": "key",
-              "keyValue": "oura",
-              "condition": "eq"
+              "keyName": "receipt_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.receipt_id }}"
             }
           ]
         },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "key": "oura",
-            "state_json": "={{ $json.state_json }}"
+            "status": "canceled",
+            "canceled_at": "={{ $json.canceled_at }}",
+            "resolved_at": "={{ $json.resolved_at }}"
           },
           "matchingColumns": [],
           "schema": [
             {
-              "id": "key",
-              "displayName": "key",
+              "id": "receipt_id",
+              "displayName": "receipt_id",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -176,85 +718,98 @@
               "removed": false
             },
             {
-              "id": "state_json",
-              "displayName": "state_json",
+              "id": "ring_key",
+              "displayName": "ring_key",
               "required": false,
               "defaultMatch": false,
               "display": true,
               "type": "string",
               "readOnly": false,
               "removed": false
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "expires_at",
+              "displayName": "expires_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "acknowledged_at",
+              "displayName": "acknowledged_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "canceled_at",
+              "displayName": "canceled_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
             }
           ],
           "attemptToConvertTypes": false,
           "convertFieldsToString": false
-        },
-        "options": {},
-        "resource": "row"
+        }
       },
       "type": "n8n-nodes-base.dataTable",
       "typeVersion": 1.1,
       "position": [
-        1630,
-        0
+        2380,
+        -350
       ],
-      "id": "25dec0e8-7e9a-4f51-bc1b-d2f3ecfaf615",
-      "name": "Save Battery State"
-    },
-    {
-      "parameters": {
-        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
-        "message": "={{ $json.message }}",
-        "priority": 2,
-        "retry": 1800,
-        "expire": 10800,
-        "additionalFields": {
-          "title": "={{ $json.title }}"
-        }
-      },
-      "type": "n8n-nodes-base.pushover",
-      "typeVersion": 1,
-      "position": [
-        1130,
-        -50
-      ],
-      "id": "2763f1b2-6b60-4de3-8bf4-483de792947f",
-      "name": "Push a message",
-      "retryOnFail": true
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Diagnostic only: always sends a test; does not read or modify Oura state.\nreturn [{ json: { title: 'Oura Ring — Test', message: 'Test notification received. Pushover emergency delivery is working.' } }];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -315,
-        340
-      ],
-      "id": "08fb2a4a-f8ea-4501-a2c3-5a5169262fbb",
-      "name": "Compose Test Alert"
-    },
-    {
-      "parameters": {
-        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
-        "message": "={{ $json.message }}",
-        "priority": 2,
-        "retry": 60,
-        "expire": 120,
-        "additionalFields": {
-          "title": "={{ $json.title }}"
-        }
-      },
-      "type": "n8n-nodes-base.pushover",
-      "typeVersion": 1,
-      "position": [
-        -40,
-        340
-      ],
-      "id": "ca5e8cda-24d9-4a35-b52d-3157ce7c235f",
-      "name": "Push Test Notification"
+      "id": "cbbedb28-787a-411f-bd1a-36dcd4728492",
+      "name": "Mark Previous Canceled"
     },
     {
       "parameters": {
@@ -268,12 +823,12 @@
           "combinator": "and",
           "conditions": [
             {
-              "id": "1ae5df28-34c3-4fbc-8ddb-cdfb25bb88cb",
-              "leftValue": "={{ $json.action }}",
-              "rightValue": "cancel",
+              "id": "ef16f183-b76c-4256-a883-d10180e2840c",
+              "leftValue": "={{ $('Evaluate Battery').first().json.alert_type !== 'none' }}",
               "operator": {
-                "type": "string",
-                "operation": "equals"
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
               }
             }
           ]
@@ -283,81 +838,541 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        650,
-        -120
+        2620,
+        -140
       ],
-      "id": "b0f91257-ce97-4f4c-a82b-59758024801c",
-      "name": "Cancel Pending Alerts?"
+      "id": "ccd9ebd0-1569-4ff6-af81-7938b94b2821",
+      "name": "Send New Alert?"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const rows=$('Evaluate Battery').first().json.receiptsToCancel;\nif(!Array.isArray(rows)||!rows.length)throw new Error('Cancel route missing receipt IDs');\nreturn rows.map(receipt=>({json:{receipt}}));"
+        "jsCode": "const b=$('Evaluate Battery').first().json;\nreturn [{json:{message:b.message,title:b.title,alert_type:b.alert_type}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        900,
-        -340
+        2840,
+        -210
       ],
-      "id": "58fa1ff0-2b05-47e8-9272-4b787a3748a2",
-      "name": "Prepare Receipt Cancellations"
+      "id": "c6439e27-9ab0-4393-8a35-b18a00269717",
+      "name": "Prepare Alert Message"
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{ 'https://api.pushover.net/1/receipts/' + $json.receipt + '/cancel.json' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "pushoverApi",
-        "sendBody": true,
-        "contentType": "form-urlencoded",
-        "specifyBody": "keypair",
-        "bodyParameters": {
-          "parameters": [
+        "resource": "message",
+        "operation": "push",
+        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
+        "message": "={{ $json.message }}",
+        "priority": 2,
+        "retry": 1800,
+        "expire": 10800,
+        "additionalFields": {
+          "title": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.pushover",
+      "typeVersion": 1,
+      "position": [
+        3060,
+        -210
+      ],
+      "id": "fae3c081-15ee-44a7-ae1e-1eafad1dab8d",
+      "name": "Send Pushover Emergency"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "receipt_id": "={{ $('Send Pushover Emergency').first().json.receipt }}",
+            "ring_key": "oura",
+            "alert_type": "={{ $('Evaluate Battery').first().json.alert_type }}",
+            "status": "active",
+            "sent_at": "={{ new Date().toISOString() }}",
+            "expires_at": "={{ new Date(Date.now()+10800*1000).toISOString() }}",
+            "acknowledged_at": null,
+            "canceled_at": null,
+            "resolved_at": null
+          },
+          "matchingColumns": [],
+          "schema": [
             {
-              "name": "token",
-              "value": "OVERRIDDEN_BY_PUSHOVER_CREDENTIAL"
+              "id": "receipt_id",
+              "displayName": "receipt_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ring_key",
+              "displayName": "ring_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "alert_type",
+              "displayName": "alert_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "expires_at",
+              "displayName": "expires_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "acknowledged_at",
+              "displayName": "acknowledged_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "canceled_at",
+              "displayName": "canceled_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3280,
+        -210
+      ],
+      "id": "39eabe70-9903-450b-9b93-bbe50a7d9672",
+      "name": "Insert Active Receipt"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const b={...$('Evaluate Battery').first().json};\nconst type=b.alert_type;\nif(type==='low')b.low_alert_sent=true;\nif(type==='unresponsive')b.unresponsive_alert_sent=true;\nif(type==='dead'){b.dead_alert_sent=true;b.low_alert_sent=true;}\nreturn [{json:b}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -210
+      ],
+      "id": "18468e93-b0ff-4d5f-9da8-e7a0647a89bb",
+      "name": "Mark Sent"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$('Evaluate Battery').first().json}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2840,
+        80
+      ],
+      "id": "cbe16707-6bdc-449e-842c-769c4aaf9bf3",
+      "name": "No New Alert"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_monitor_state"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "ring_key",
+              "condition": "eq",
+              "keyValue": "oura"
             }
           ]
         },
-        "options": {}
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "battery_level": "={{ $json.battery_level }}",
+            "last_source_at": "={{ $json.last_source_at }}",
+            "last_source_seen_at": "={{ $json.last_source_seen_at }}",
+            "last_checked_at": "={{ $json.last_checked_at }}",
+            "next_poll_at": "={{ $json.next_poll_at }}",
+            "charging": "={{ $json.charging }}",
+            "in_charger": "={{ $json.in_charger }}",
+            "low_alert_sent": "={{ $json.low_alert_sent }}",
+            "unresponsive_alert_sent": "={{ $json.unresponsive_alert_sent }}",
+            "dead_alert_sent": "={{ $json.dead_alert_sent }}",
+            "snoozed_until": "={{ $json.snoozed_until }}",
+            "ring_key": "oura"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ring_key",
+              "displayName": "ring_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "battery_level",
+              "displayName": "battery_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_source_at",
+              "displayName": "last_source_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_source_seen_at",
+              "displayName": "last_source_seen_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_checked_at",
+              "displayName": "last_checked_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "next_poll_at",
+              "displayName": "next_poll_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "charging",
+              "displayName": "charging",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "in_charger",
+              "displayName": "in_charger",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "low_alert_sent",
+              "displayName": "low_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "unresponsive_alert_sent",
+              "displayName": "unresponsive_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "dead_alert_sent",
+              "displayName": "dead_alert_sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "snoozed_until",
+              "displayName": "snoozed_until",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
       },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
       "position": [
-        1130,
-        -340
+        3770,
+        -80
       ],
-      "id": "cb50e2d9-17a8-42c4-87e4-ded46ef1ef98",
-      "name": "Cancel Pushover Receipts"
+      "id": "d8c819ee-cec2-42ef-89e2-dba7277202e5",
+      "name": "Save Ring State"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const responses=$input.all();\nconst expected=$('Prepare Receipt Cancellations').all().length;\nif(responses.length!==expected||responses.some(r=>Number(r.json.status)!==1))\n  throw new Error('Receipt cancellation incomplete; stored receipts retained.');\nconst state=JSON.parse($('Evaluate Battery').first().json.state_json);\nconst canceled=new Set($('Prepare Receipt Cancellations').all().map(r=>r.json.receipt));\nstate.receipts=(state.receipts||[]).filter(r=>!canceled.has(r.id));\nreturn [{json:{key:'oura',state_json:JSON.stringify(state)}}];"
+        "jsCode": "return [{json:{title:'Oura Ring — TEST',message:'Test notification received. Emergency delivery is working.'}}];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1350,
-        -340
+        -1260,
+        220
       ],
-      "id": "389f4b4a-eb8e-4f73-a13a-1a55ae640913",
-      "name": "Confirm Receipt Cancellations"
+      "id": "7e69e867-353b-49c0-a4ec-693940ffa7f9",
+      "name": "Compose Test Message"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "push",
+        "userKey": "REPLACE_WITH_PUSHOVER_USER_KEY",
+        "message": "={{ $json.message }}",
+        "priority": 2,
+        "retry": 60,
+        "expire": 120,
+        "additionalFields": {
+          "title": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.pushover",
+      "typeVersion": 1,
+      "position": [
+        -1020,
+        220
+      ],
+      "id": "59bee218-5cdc-4d9b-bb34-1d5b8b9e0bbf",
+      "name": "Send Test Pushover"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1520,
+        600
+      ],
+      "id": "6c91310c-e007-464e-a5d5-fb9d662e1b63",
+      "name": "Daily Cleanup"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "neq",
+              "keyValue": "active"
+            },
+            {
+              "keyName": "resolved_at",
+              "condition": "lt",
+              "keyValue": "={{ new Date(Date.now()-30*86400000).toISOString() }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1260,
+        600
+      ],
+      "id": "997bf801-314e-42ce-b3bc-32e8f8c00c4f",
+      "name": "Delete Closed >30 Days",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "neq",
+              "keyValue": "active"
+            }
+          ]
+        },
+        "returnAll": true,
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1020,
+        600
+      ],
+      "id": "56fed920-a91f-4915-8158-c0c14c9fc10f",
+      "name": "Load Closed for Cap",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const receipt=$input.first()?.json?.receipt;\nif(typeof receipt!=='string'||!/^[A-Za-z0-9]{30}$/.test(receipt))\n  throw new Error('Pushover emergency response missing receipt; cannot track cancellation');\nconst original=$('Evaluate Battery').first().json;\nconst state=JSON.parse(original.state_json);\nstate.receipts=Array.isArray(state.receipts)?state.receipts:[];\nstate.receipts.push({id:receipt,alert:original.alert,expiresAtMs:Date.now()+10800*1000});\nreturn [{json:{key:'oura',state_json:JSON.stringify(state)}}];"
+        "jsCode": "const all=$input.all().map(i=>i.json).filter(r=>r.receipt_id&&r.status!=='active');\nall.sort((a,b)=>Date.parse(b.sent_at||'')-Date.parse(a.sent_at||''));\nreturn all.slice(250).map(r=>({json:{receipt_id:r.receipt_id}}));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1350,
-        -50
+        -780,
+        600
       ],
-      "id": "aa2429ee-e38e-46d4-a0ba-5b3456722753",
-      "name": "Record Pushover Receipt"
+      "id": "316c1f14-80fe-45b6-887a-624682c2f125",
+      "name": "Select Overflow Rows"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "oura_battery_alerts"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "receipt_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.receipt_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -520,
+        600
+      ],
+      "id": "e53f171a-eb2e-4c73-9e4e-9c8d51c990a3",
+      "name": "Delete Overflow Receipts"
     }
   ],
   "connections": {
@@ -365,7 +1380,7 @@
       "main": [
         [
           {
-            "node": "Load Battery State",
+            "node": "Find Active Receipt",
             "type": "main",
             "index": 0
           }
@@ -376,30 +1391,150 @@
       "main": [
         [
           {
-            "node": "Load Battery State",
+            "node": "Find Active Receipt",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Compose Test Alert",
+            "node": "Compose Test Message",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Load Battery State": {
+    "Compose Test Message": {
       "main": [
         [
           {
-            "node": "Check Next Poll Time",
+            "node": "Send Test Pushover",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Next Poll Time": {
+    "Find Active Receipt": {
+      "main": [
+        [
+          {
+            "node": "Receipt Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receipt Exists?": {
+      "main": [
+        [
+          {
+            "node": "Read Pushover Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pushover Receipt": {
+      "main": [
+        [
+          {
+            "node": "Classify Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Receipt": {
+      "main": [
+        [
+          {
+            "node": "Receipt Resolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receipt Resolved?": {
+      "main": [
+        [
+          {
+            "node": "Resolve Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Receipt": {
+      "main": [
+        [
+          {
+            "node": "Acknowledged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledged?": {
+      "main": [
+        [
+          {
+            "node": "Record Snooze",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Snooze": {
+      "main": [
+        [
+          {
+            "node": "Load Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Ring State": {
+      "main": [
+        [
+          {
+            "node": "Polling Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Polling Gate": {
       "main": [
         [
           {
@@ -414,6 +1549,17 @@
       "main": [
         [
           {
+            "node": "Get Current Active Receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Active Receipt": {
+      "main": [
+        [
+          {
             "node": "Evaluate Battery",
             "type": "main",
             "index": 0
@@ -425,109 +1571,175 @@
       "main": [
         [
           {
-            "node": "Cancel Pending Alerts?",
+            "node": "Cancel Previous Alert?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Send Oura Alert?": {
+    "Cancel Previous Alert?": {
       "main": [
         [
           {
-            "node": "Push a message",
+            "node": "Cancel Old Pushover Receipt",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Save Battery State",
+            "node": "Send New Alert?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Push a message": {
+    "Cancel Old Pushover Receipt": {
       "main": [
         [
           {
-            "node": "Record Pushover Receipt",
+            "node": "Verify Cancellation",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Compose Test Alert": {
+    "Verify Cancellation": {
       "main": [
         [
           {
-            "node": "Push Test Notification",
+            "node": "Mark Previous Canceled",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Cancel Pending Alerts?": {
+    "Mark Previous Canceled": {
       "main": [
         [
           {
-            "node": "Prepare Receipt Cancellations",
+            "node": "Send New Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send New Alert?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert Message",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Send Oura Alert?",
+            "node": "No New Alert",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Receipt Cancellations": {
+    "Prepare Alert Message": {
       "main": [
         [
           {
-            "node": "Cancel Pushover Receipts",
+            "node": "Send Pushover Emergency",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Cancel Pushover Receipts": {
+    "Send Pushover Emergency": {
       "main": [
         [
           {
-            "node": "Confirm Receipt Cancellations",
+            "node": "Insert Active Receipt",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Confirm Receipt Cancellations": {
+    "Insert Active Receipt": {
       "main": [
         [
           {
-            "node": "Save Battery State",
+            "node": "Mark Sent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Record Pushover Receipt": {
+    "Mark Sent": {
       "main": [
         [
           {
-            "node": "Save Battery State",
+            "node": "Save Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No New Alert": {
+      "main": [
+        [
+          {
+            "node": "Save Ring State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Cleanup": {
+      "main": [
+        [
+          {
+            "node": "Delete Closed >30 Days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Closed >30 Days": {
+      "main": [
+        [
+          {
+            "node": "Load Closed for Cap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Closed for Cap": {
+      "main": [
+        [
+          {
+            "node": "Select Overflow Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Overflow Rows": {
+      "main": [
+        [
+          {
+            "node": "Delete Overflow Receipts",
             "type": "main",
             "index": 0
           }
@@ -535,10 +1747,9 @@
       ]
     }
   },
-  "pinData": {},
-  "name": "Oura Ring — Adaptive Alerts & Charging Cancellation",
-  "active": false,
   "settings": {
     "executionOrder": "v1"
-  }
+  },
+  "active": false,
+  "pinData": {}
 }
